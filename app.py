@@ -22,7 +22,7 @@ import plotly.express as px
 # Make sure src/ is on the path when running from the project root
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "src"))
 
-from config import AOI_NAME, AOI_BBOX, DATE_START_1, DATE_END_1, DATE_START_2, DATE_END_2
+import config as cfg
 from analysis import (
     compute_uhi_intensity,
     detect_hotspots,
@@ -31,12 +31,13 @@ from analysis import (
     make_simple_urban_mask,
     summarise_by_zone,
 )
+from map_utils import create_map_with_overlay
 
 # ---------------------------------------------------------------------------
 # Page config — must be the first Streamlit call
 # ---------------------------------------------------------------------------
 st.set_page_config(
-    page_title=f"Urban Heat Island — {AOI_NAME}",
+    page_title=f"Urban Heat Island — {cfg.AOI_NAME}",
     page_icon="🌡️",
     layout="wide",
 )
@@ -109,134 +110,19 @@ def load_lst(year_label: str) -> np.ndarray:
         return base
 
 
-def create_aoi_basemap(year_label: str, blend_mode: str = "Normal") -> folium.Map:
-    min_lon, min_lat, max_lon, max_lat = AOI_BBOX
-    center = [(min_lat + max_lat) / 2, (min_lon + max_lon) / 2]
+def create_aoi_basemap(year_label: str, blend_mode: str = cfg.DEFAULT_BLEND_MODE, colormap: str = cfg.DEFAULT_COLORMAP, opacity: float = cfg.DEFAULT_OVERLAY_OPACITY) -> folium.Map:
+    """Wrapper that builds the AOI basemap using map_utils.create_map_with_overlay.
 
-    m = folium.Map(location=center, zoom_start=10, tiles="CartoDB positron")
-    tif_path = os.path.join("data", "raw", f"lst_{year_label}.tif")
-
-    if os.path.exists(tif_path):
-        try:
-            import rasterio
-            import rasterio.warp
-            import matplotlib.cm as cm
-            import matplotlib.colors as colors
-            from pathlib import Path
-
-            rasterio_proj_data = Path(rasterio.__file__).resolve().parent / "proj_data"
-            if rasterio_proj_data.exists():
-                os.environ["PROJ_LIB"] = str(rasterio_proj_data)
-
-            with rasterio.open(tif_path) as src:
-                lst_raw = src.read(1).astype(np.float32)
-                lst_raw[lst_raw == src.nodata] = np.nan
-                geo_bounds = rasterio.warp.transform_bounds(
-                    src.crs,
-                    "EPSG:4326",
-                    src.bounds.left,
-                    src.bounds.bottom,
-                    src.bounds.right,
-                    src.bounds.top,
-                    densify_pts=21,
-                )
-                bounds = [[geo_bounds[1], geo_bounds[0]], [geo_bounds[3], geo_bounds[2]]]
-
-            if np.all(np.isnan(lst_raw)):
-                raise ValueError("Raster contains only nodata values")
-
-            vmin, vmax = np.nanpercentile(lst_raw, [2, 98])
-            norm = colors.Normalize(vmin=vmin, vmax=vmax, clip=True)
-            rgba = cm.get_cmap("RdYlBu_r")(norm(np.nan_to_num(lst_raw, nan=vmin)))
-            rgba[..., 3] = np.where(np.isnan(lst_raw), 0.0, 0.75)
-            overlay_array = (rgba * 255).astype(np.uint8)
-
-            blend_css = blend_mode.lower() if blend_mode != "Normal" else None
-            overlay_kwargs = dict(
-                image=overlay_array,
-                bounds=bounds,
-                opacity=0.85,
-                name=f"LST {year_label}",
-                interactive=True,
-                cross_origin=False,
-                zindex=1,
-                origin='upper',
-            )
-
-            folium.raster_layers.ImageOverlay(**overlay_kwargs).add_to(m)
-
-            if blend_css:
-                from branca.element import Template, MacroElement
-
-                script_html = f"""
-                {{% macro script(this, kwargs) %}}
-                <script>
-                    // Set blend mode on the image overlay
-                    document.addEventListener('DOMContentLoaded', function() {{
-                        var imgs = document.querySelectorAll('.leaflet-image-layer');
-                        imgs.forEach(function(img) {{
-                            img.style.mixBlendMode = '{blend_css}';
-                        }});
-                    }});
-                </script>
-                {{% endmacro %}}
-                """
-                script = MacroElement()
-                script._template = Template(script_html)
-                m.get_root().add_child(script)
-
-            folium.Rectangle(
-                bounds=[[min_lat, min_lon], [max_lat, max_lon]],
-                color="#D85A30",
-                weight=3,
-                fill=False,
-                opacity=0.8,
-                tooltip=f"{AOI_NAME} AOI",
-            ).add_to(m)
-            folium.LayerControl().add_to(m)
-
-            try:
-                from branca.element import Template, MacroElement
-
-                legend_html = f"""
-                {{% macro html(this, kwargs) %}}
-                <div style="position: fixed; bottom: 45px; left: 10px; width: 210px; height: 120px; 
-                            background-color: white; border:2px solid grey; z-index:9999; font-size:14px; 
-                            line-height:18px; padding: 10px; opacity: 0.88;">
-                    <strong>LST overlay</strong><br>
-                    <i style="background: #a50026; width: 18px; height: 12px; float: left; margin-right: 8px;"></i> Hot ~{vmax:.1f}°C<br>
-                    <i style="background: #ffffbf; width: 18px; height: 12px; float: left; margin-right: 8px;"></i> Mid ~{(vmax+vmin)/2:.1f}°C<br>
-                    <i style="background: #313695; width: 18px; height: 12px; float: left; margin-right: 8px;"></i> Cool ~{vmin:.1f}°C<br>
-                    <div style="clear: both;"></div>
-                    <div style="margin-top: 6px; font-size:12px; color:#555;">Opacity 85% for stronger overlay visibility</div>
-                </div>
-                {{% endmacro %}}
-                """
-                legend = MacroElement()
-                legend._template = Template(legend_html)
-                m.get_root().add_child(legend)
-            except Exception:
-                pass
-        except Exception as e:
-            st.warning(f"Could not overlay TIFF on basemap: {e}")
-    else:
-        folium.Rectangle(
-            bounds=[[min_lat, min_lon], [max_lat, max_lon]],
-            color="#D85A30",
-            weight=3,
-            fill=False,
-            tooltip=f"{AOI_NAME} AOI",
-        ).add_to(m)
-        folium.Marker(center, popup=AOI_NAME, tooltip="Study area center").add_to(m)
-
-    return m
+    Keeps app.py small — actual implementation lives in map_utils.py.
+    """
+    return create_map_with_overlay(year_label, blend_mode=blend_mode, colormap=colormap, opacity=opacity)
 
 
 # ---------------------------------------------------------------------------
 # Sidebar
 # ---------------------------------------------------------------------------
 st.sidebar.title("🌡️ UHI Tracker")
-st.sidebar.markdown(f"**Study area:** {AOI_NAME}")
+st.sidebar.markdown(f"**Study area:** {cfg.AOI_NAME}")
 st.sidebar.markdown("---")
 
 selected_year = st.sidebar.radio(
@@ -266,7 +152,7 @@ cool       = detect_cool_islands(lst)
 # ---------------------------------------------------------------------------
 # Main header
 # ---------------------------------------------------------------------------
-st.title(f"Urban Heat Island Tracker — {AOI_NAME}")
+st.title(f"Urban Heat Island Tracker — {cfg.AOI_NAME}")
 st.caption(
     f"Land Surface Temperature (LST) derived from Landsat thermal band (ST_B10) · "
     f"Showing {selected_year} dry-season composite"
@@ -302,12 +188,154 @@ with tab1:
 
     overlay_mode = st.selectbox(
         "Overlay blend mode",
-        options=["Normal", "Darken", "Lighten", "Multiply", "Screen", "Overlay"],
+        options=cfg.BLEND_MODES,
+        index=cfg.BLEND_MODES.index(cfg.DEFAULT_BLEND_MODE) if cfg.DEFAULT_BLEND_MODE in cfg.BLEND_MODES else 0,
         help="Choose how the LST raster blends with the basemap.",
     )
 
+    colormap = st.selectbox(
+        "Colormap",
+        options=cfg.AVAILABLE_COLORMAPS,
+        index=cfg.AVAILABLE_COLORMAPS.index(cfg.DEFAULT_COLORMAP) if cfg.DEFAULT_COLORMAP in cfg.AVAILABLE_COLORMAPS else 0,
+        help="Select a matplotlib colormap for the LST overlay.",
+    )
+
+    overlay_opacity = st.slider("Overlay opacity", min_value=0.0, max_value=1.0, value=float(cfg.DEFAULT_OVERLAY_OPACITY), step=0.05)
+
     st.markdown("### Nairobi study area")
-    st_folium(create_aoi_basemap(selected_year, overlay_mode), width=700, height=360)
+
+    # Use the map_utils helper to get PNG data URI and metadata (cached)
+    try:
+        from map_utils import get_overlay_png_bytes
+
+        @st.cache_data(show_spinner=False)
+        def _get_cached_overlay_payload(y, cm):
+            return get_overlay_png_bytes(y, cm)
+
+        @st.cache_data(show_spinner="Rendering cached map HTML…", max_entries=8)
+        def _get_cached_map_html_bytes(y, bm, cm, op):
+            # Return rendered HTML bytes for the fully-built map (used for downloads)
+            from map_utils import create_map_with_overlay
+
+            m_full = create_map_with_overlay(y, blend_mode=bm, colormap=cm, opacity=op)
+            return m_full.get_root().render().encode("utf-8")
+
+        payload = _get_cached_overlay_payload(selected_year, colormap)
+
+        # Persist UI selections in session_state for continuity
+        st.session_state.setdefault('overlay_mode', overlay_mode)
+        st.session_state.setdefault('colormap', colormap)
+        st.session_state.setdefault('overlay_opacity', overlay_opacity)
+
+        # Build map quickly using cached PNG data URI
+        min_lon, min_lat, max_lon, max_lat = cfg.AOI_BBOX
+        center = [(min_lat + max_lat) / 2, (min_lon + max_lon) / 2]
+        m_quick = folium.Map(location=center, zoom_start=10, tiles=cfg.MAP_TILES)
+        folium.raster_layers.ImageOverlay(
+            image=payload["data_uri"],
+            bounds=payload["bounds"],
+            opacity=overlay_opacity,
+            origin="upper",
+        ).add_to(m_quick)
+
+        # Determine bounds to use: prefer persisted bounds (map view), else payload
+        def _pad_bounds(bounds, pad_frac: float = cfg.DEFAULT_MAP_PADDING):
+            # bounds = [[lat_min, lon_min], [lat_max, lon_max]]
+            (lat_min, lon_min), (lat_max, lon_max) = (bounds[0], bounds[1])
+            lat_pad = (lat_max - lat_min) * pad_frac
+            lon_pad = (lon_max - lon_min) * pad_frac
+            return [[lat_min - lat_pad, lon_min - lon_pad], [lat_max + lat_pad, lon_max + lon_pad]]
+
+        use_bounds = st.session_state.get('map_bounds', payload['bounds'])
+        padded = _pad_bounds(use_bounds, cfg.DEFAULT_MAP_PADDING)
+        try:
+            m_quick.fit_bounds(padded)
+        except Exception:
+            try:
+                m_quick.fit_bounds(payload["bounds"])
+            except Exception:
+                pass
+
+        bm = overlay_mode.lower() if overlay_mode and overlay_mode != "Normal" else None
+        if bm:
+            from branca.element import Template, MacroElement
+
+            script_html = f"""
+            {{% macro script(this, kwargs) %}}
+            <script>
+            document.addEventListener('DOMContentLoaded', function() {{
+                var imgs = document.querySelectorAll('.leaflet-image-layer');
+                imgs.forEach(function(img) {{ img.style.mixBlendMode = '{bm}'; img.style.opacity = '{overlay_opacity}'; }});
+            }});
+            </script>
+            {{% endmacro %}}
+            """
+            script = MacroElement()
+            script._template = Template(script_html)
+            m_quick.get_root().add_child(script)
+
+        folium.Rectangle(
+            bounds=[[min_lat, min_lon], [max_lat, max_lon]],
+            color=cfg.AOI_BOUNDARY_COLOR,
+            weight=cfg.AOI_BOUNDARY_WEIGHT,
+            fill=False,
+            opacity=cfg.AOI_BOUNDARY_OPACITY,
+            tooltip=f"{cfg.AOI_NAME} AOI",
+        ).add_to(m_quick)
+
+        folium.LayerControl().add_to(m_quick)
+
+        st_folium(m_quick, width=700, height=360)
+
+        # Save current payload bounds into session_state so they persist across interactions
+        st.session_state['map_bounds'] = payload['bounds']
+
+        # --- Export / download buttons ---
+        try:
+            import base64
+
+            # Use cached full-map HTML for downloads when possible
+            try:
+                html_bytes = _get_cached_map_html_bytes(selected_year, overlay_mode, colormap, overlay_opacity)
+            except Exception:
+                html_bytes = m_quick.get_root().render().encode("utf-8")
+            png_b64 = payload["data_uri"].split(",", 1)[1]
+            png_bytes = base64.b64decode(png_b64)
+
+            col1, col2, col3 = st.columns(3)
+            with col1:
+                st.download_button("Download map (HTML)", data=html_bytes, file_name=f"lst_map_{selected_year}.html", mime="text/html")
+            with col2:
+                st.download_button("Download overlay (PNG)", data=png_bytes, file_name=f"lst_overlay_{selected_year}.png", mime="image/png")
+            with col3:
+                # Metrics CSV
+                try:
+                    metrics_csv = "metric,value\n"
+                    if 'stats' in locals() and isinstance(stats, dict):
+                        for k, v in stats.items():
+                            metrics_csv += f"{k},{v}\n"
+                    else:
+                        metrics_csv += f"hotspot_pixels,{hotspots.sum()}\n"
+                    st.download_button("Download metrics (CSV)", data=metrics_csv.encode('utf-8'), file_name=f"lst_metrics_{selected_year}.csv", mime="text/csv")
+                except Exception:
+                    pass
+            # Extra column for GeoTIFF
+            try:
+                tif_path = os.path.join('data','raw', f'lst_{selected_year}.tif')
+                if os.path.exists(tif_path):
+                    with open(tif_path, 'rb') as fh:
+                        tif_bytes = fh.read()
+                    st.download_button("Download raw GeoTIFF", data=tif_bytes, file_name=f"lst_{selected_year}.tif", mime="application/octet-stream")
+            except Exception:
+                pass
+        except Exception:
+            pass
+        except Exception:
+            pass
+    except Exception as e:
+        # Fall back to original (slower) map builder
+        st.warning(f"Could not use cached overlay: {e}")
+        st_folium(create_aoi_basemap(selected_year, overlay_mode, colormap, overlay_opacity), width=700, height=360)
 
     fig = px.imshow(
         lst,

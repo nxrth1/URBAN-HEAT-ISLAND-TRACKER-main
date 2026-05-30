@@ -46,3 +46,54 @@ ST_OFFSET       = 149.0
 # ---------------------------------------------------------------------------
 DATA_RAW       = "data/raw"
 DATA_PROCESSED = "data/processed"
+
+# ---------------------------------------------------------------------------
+# Map visualization settings (centralised)
+# ---------------------------------------------------------------------------
+# Map overlay opacity (0.0 = transparent, 1.0 = opaque)
+DEFAULT_OVERLAY_OPACITY = 0.85
+
+# Default colormap for LST visualization
+DEFAULT_COLORMAP = "RdYlBu_r"
+
+# Available colormaps for user selection
+AVAILABLE_COLORMAPS = [
+	"RdYlBu_r",      # Red-Yellow-Blue (reversed) — traditional for temperature
+	"viridis",       # Perceptually uniform
+	"plasma",        # Perceptually uniform, bright
+	"turbo",         # Rainbow-like with good contrast
+	"coolwarm",      # Diverging colormap
+	"seismic",       # Diverging: blue-white-red
+	"twilight",      # Cyclic colormap
+]
+
+# Default blend modes for overlay
+BLEND_MODES = ["Normal", "Darken", "Lighten", "Multiply", "Screen", "Overlay"]
+DEFAULT_BLEND_MODE = "Normal"
+
+# Map tile provider
+MAP_TILES = "CartoDB positron"
+
+# Default map zoom level (can be auto-fitted to bounds)
+DEFAULT_MAP_ZOOM = 10
+
+# Default padding when auto-fitting bounds (fraction to expand bbox)
+DEFAULT_MAP_PADDING = 0.05  # 5% padding
+
+# Raster percentiles for color normalization
+LST_PERCENTILE_MIN = 2
+LST_PERCENTILE_MAX = 98
+
+# Raster smoothing kernel size
+RASTER_SMOOTH_KERNEL = 3
+
+# Hot spot percentile threshold (top X% of pixels)
+HOTSPOT_PERCENTILE = 90  # top 10% = 90th percentile
+
+# Cool island percentile threshold (bottom X% of pixels)
+COOL_PERCENTILE = 15  # bottom 15% = 15th percentile
+
+# AOI boundary styling
+AOI_BOUNDARY_COLOR = "#D85A30"
+AOI_BOUNDARY_WEIGHT = 3
+AOI_BOUNDARY_OPACITY = 0.8

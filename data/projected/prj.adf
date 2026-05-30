@@ -1,0 +1,8 @@
+Projection    UTM
+Zone          36
+Datum         ARS
+Spheroid      CLARKE1880
+Units         METERS
+Zunits        NO
+Yshift        10000000.0
+Parameters    
