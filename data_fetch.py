@@ -35,8 +35,8 @@ def search_scenes(date_start: str, date_end: str) -> list:
     Search the Planetary Computer STAC catalog for Landsat scenes over our AOI.
 
     Args:
-        date_start: ISO date string, e.g. "2023-06-01"
-        date_end:   ISO date string, e.g. "2023-09-30"
+        date_start: ISO date string, e.g. "2015-06-01"
+        date_end:   ISO date string, e.g. "2015-09-30"
 
     Returns:
         List of STAC items (each item = one satellite pass / scene).
@@ -194,11 +194,19 @@ def save_raster(array: np.ndarray, coords, filename: str):
 
 
 if __name__ == "__main__":
-    # Quick test: fetch one period and check we get temperature data back
-    from config import DATE_START_2, DATE_END_2
+    # Import BOTH sets of dates from your config file
+    from config import DATE_START_1, DATE_END_1, DATE_START_2, DATE_END_2
 
-    items = search_scenes(DATE_START_2, DATE_END_2)
-    if items:
-        lst, coords = load_surface_temperature(items)
-        save_raster(lst, coords, "lst_2023.tif")
-        print("\nFetch successful! Open data/raw/lst_2023.tif in QGIS to inspect.")
+    # 1. Fetch 2015 Data (Year 1)
+    items_2015 = search_scenes(DATE_START_1, DATE_END_1)
+    if items_2015:
+        lst_2015, coords_2015 = load_surface_temperature(items_2015)
+        save_raster(lst_2015, coords_2015, "lst_2015.tif")
+        
+    # 2. Fetch 2023 Data (Year 2)
+    items_2023 = search_scenes(DATE_START_2, DATE_END_2)
+    if items_2023:
+        lst_2023, coords_2023 = load_surface_temperature(items_2023)
+        save_raster(lst_2023, coords_2023, "lst_2023.tif")
+
+    print("\nFetch successful! Both 2015 and 2023 datasets are ready in data/raw/")
